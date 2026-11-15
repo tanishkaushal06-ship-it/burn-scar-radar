@@ -1,0 +1,162 @@
+{
+ "site": "fraser",
+ "city": "Boston Bar",
+ "fire_name": "Brunswick Complex, Fraser Canyon (2026)",
+ "fire_start": "2026-07-02",
+ "frames": {
+  "label": "HV change from before the fire (dB)",
+  "ramp": "RdBu",
+  "vmin": -6,
+  "vmax": 6,
+  "items": [
+   {
+    "date": "2026-06-19",
+    "file": "data/fraser/frame_20260619.png"
+   },
+   {
+    "date": "2026-07-01",
+    "file": "data/fraser/frame_20260701.png"
+   },
+   {
+    "date": "2026-07-13",
+    "file": "data/fraser/frame_20260713.png"
+   },
+   {
+    "date": "2026-07-25",
+    "file": "data/fraser/frame_20260725.png"
+   },
+   {
+    "date": "2026-08-18",
+    "file": "data/fraser/frame_20260818.png"
+   },
+   {
+    "date": "2026-08-30",
+    "file": "data/fraser/frame_20260830.png"
+   },
+   {
+    "date": "2026-09-23",
+    "file": "data/fraser/frame_20260923.png"
+   },
+   {
+    "date": "2026-10-05",
+    "file": "data/fraser/frame_20261005.png"
+   },
+   {
+    "date": "2026-10-17",
+    "file": "data/fraser/frame_20261017.png"
+   },
+   {
+    "date": "2026-10-29",
+    "file": "data/fraser/frame_20261029.png"
+   }
+  ]
+ },
+ "before_dates": [
+  "2026-06-19",
+  "2026-07-01"
+ ],
+ "after_dates": [
+  "2026-10-05",
+  "2026-10-17",
+  "2026-10-29"
+ ],
+ "overlays": {
+  "hv_before": {
+   "file": "data/fraser/hv_before.png",
+   "label": "HV before fire (dB)",
+   "coords": [
+    [
+     -121.53692798802697,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     49.84552926616302
+    ],
+    [
+     -121.53692798802697,
+     49.84552926616302
+    ]
+   ],
+   "vmin": -15.2,
+   "vmax": -3.2
+  },
+  "hv_after": {
+   "file": "data/fraser/hv_after.png",
+   "label": "HV after fire (dB)",
+   "coords": [
+    [
+     -121.53692798802697,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     49.84552926616302
+    ],
+    [
+     -121.53692798802697,
+     49.84552926616302
+    ]
+   ],
+   "vmin": -15.2,
+   "vmax": -3.2
+  },
+  "hv_change": {
+   "file": "data/fraser/hv_change.png",
+   "label": "HV change, after minus before (dB)",
+   "coords": [
+    [
+     -121.53692798802697,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     49.84552926616302
+    ],
+    [
+     -121.53692798802697,
+     49.84552926616302
+    ]
+   ],
+   "vmin": -6,
+   "vmax": 6
+  },
+  "dnbr": {
+   "file": "data/fraser/dnbr.png",
+   "label": "Sentinel-2 dNBR (burn severity)",
+   "coords": [
+    [
+     -121.53692798802697,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     50.002312955207465
+    ],
+    [
+     -121.27164228013109,
+     49.84552926616302
+    ],
+    [
+     -121.53692798802697,
+     49.84552926616302
+    ]
+   ],
+   "vmin": -0.1,
+   "vmax": 0.9
+  }
+ },
+ "demo": false
+}
