@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burn Scar Radar: NISAR wildfire tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  :root { --bg:#0f1418; --panel:#182027; --ink:#e8edf1; --quiet:#9aa7b2; --line:#2a353f; --accent:#ff7a3d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--quiet); }
+  #city { background:#182027; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 10px; font-size:15px; font-weight:600; cursor:pointer; }
+  #city:empty { display:none; }
+  #demo { display:none; background:#7a1f1f; color:#fff; padding:6px 20px; font-weight:600; }
+  main { display:grid; grid-template-columns: minmax(0,1.6fr) minmax(320px,1fr); height:calc(100vh - 56px); }
+  #mapwrap { position:relative; overflow:hidden; }
+  .map { position:absolute; inset:0; }
+  #after { clip-path: inset(0 0 0 50%); }
+  #handle { position:absolute; top:0; bottom:0; left:50%; width:4px; margin-left:-2px; background:#fff; cursor:ew-resize; z-index:5; box-shadow:0 0 6px #0008; }
+  #handle::after { content:"\2194"; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; color:#111; border-radius:50%; width:30px; height:30px; display:grid; place-items:center; font-size:16px; }
+  .picker { position:absolute; top:10px; z-index:6; background:#000b; padding:6px 8px; border-radius:6px; }
+  .picker select { background:#111; color:#fff; border:1px solid #555; border-radius:4px; padding:3px; }
+  #pickL { left:10px; } #pickR { right:10px; }
+  .legend { position:absolute; bottom:28px; z-index:6; background:#000b; padding:6px 10px; border-radius:6px; font-size:12px; min-width:170px; }
+  #legL { left:10px; } #legR { right:10px; }
+  .bar { height:10px; border-radius:3px; margin:4px 0 2px; }
+  .ends { display:flex; justify-content:space-between; color:#ccc; }
+  aside { background:var(--panel); border-left:1px solid var(--line); padding:16px 18px; overflow-y:auto; }
+  aside h2 { font-size:15px; margin:0 0 6px; }
+  .tabs { display:flex; gap:6px; margin:8px 0 10px; }
+  .tabs button { background:#0f1418; color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:4px 12px; cursor:pointer; }
+  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#111; font-weight:600; }
+  #chartbox { height:300px; }
+  .note { color:var(--quiet); font-size:13px; }
+  .zone-list { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+  .chip { border:1px solid var(--line); border-radius:999px; padding:2px 10px; cursor:pointer; font-size:12px; }
+  .chip i { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .chip.dim { opacity:.35; }
+  details { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  summary { cursor:pointer; font-weight:600; }
+  .findings { background:#0f1418; border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:12px 14px; margin-bottom:16px; }
+  .findings h2 { margin:0 0 6px; }
+  .findings ul { margin:0; padding-left:18px; }
+  .findings li { margin:5px 0; font-size:13.5px; line-height:1.45; }
+  .findings .use { margin:8px 0 0; font-size:13px; color:var(--quiet); }
+  #timebar { position:absolute; left:50%; transform:translateX(-50%); bottom:104px; z-index:7; background:#000c; border-radius:999px; padding:6px 14px; display:flex; align-items:center; gap:10px; }
+  #timebar[hidden] { display:none; }
+  #timebar button { background:var(--accent); color:#111; border:0; border-radius:999px; padding:4px 12px; font-weight:700; cursor:pointer; }
+  #tslider { width:220px; accent-color:var(--accent); }
+  #tdate { font-size:13px; min-width:150px; color:#ddd; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; height:auto; } #mapwrap { height:60vh; } }
+</style>
+</head>
+<body>
+<div id="demo">DEMO DATA: synthetic values for building the app. Run the pipeline to load real NISAR data.</div>
+<header>
+  <h1 id="apptitle">Burn Scar Radar</h1>
+  <select id="city" title="Choose a community"></select>
+  <span class="sub" id="firename">Loading...</span>
+</header>
+<main>
+  <div id="mapwrap">
+    <div id="before" class="map"></div>
+    <div id="after" class="map"></div>
+    <div id="handle" title="Drag to compare"></div>
+    <div class="picker" id="pickL"><select id="selL"></select></div>
+    <div class="picker" id="pickR"><select id="selR"></select></div>
+    <div class="legend" id="legL"></div>
+    <div class="legend" id="legR"></div>
+    <div id="timebar" hidden><button id="play">Play</button><input type="range" id="tslider" min="0" value="0" step="1"><span id="tdate"></span></div>
+  </div>
+  <aside>
+    <div class="findings" id="findings" hidden><h2>Key findings</h2><ul id="findlist"></ul><p class="use" id="finduse"></p></div>
+    <h2 id="charttitle">How each burn zone changed</h2>
+    <div class="note" id="chartnote">Mean per zone. Click a zone on the map or a chip below to focus it. The dashed line marks the fire start.</div>
+    <div class="tabs">
+      <button data-k="hvrel" class="on">HV vs Control</button>
+      <button data-k="hv">Radar HV</button>
+      <button data-k="hh">Radar HH</button>
+      <button data-k="nbr">Optical NBR</button>
+    </div>
+    <div id="chartbox"><canvas id="chart"></canvas></div>
+    <div class="zone-list" id="chips"></div>
+    <p class="note" id="explain"></p>
+    <details open id="explainer">
+      <summary>What am I looking at?</summary>
+      <p class="note"><b>HV</b> is L-band radar sent horizontally and received vertically. Most of it comes from branches and trunks, so it tracks how much forest is standing. Fire removes canopy, and HV drops. Radar sees through smoke and cloud.</p>
+      <p class="note"><b>Control</b> is an unburned ring 1 to 3 km outside the fire. It shows changes from season, rain and soil moisture alone. The gap between a burn zone and Control is the fire signal.</p>
+      <p class="note"><b>dNBR</b> is the drop in the Sentinel-2 Normalized Burn Ratio. It is the standard optical burn-severity index and the ground truth for the radar.</p>
+    </details>
+    <details>
+      <summary>Data and credits</summary>
+      <p class="note">NISAR L-band GCOV: NASA/JPL and ISRO, via the Alaska Satellite Facility DAAC. Sentinel-2 L2A: ESA Copernicus, via Microsoft Planetary Computer. Fire perimeters: BC Wildfire Service (Open Government Licence - British Columbia). Imagery basemap: Esri.</p>
+      <p class="note" id="dates"></p>
+    </details>
+  </aside>
+</main>
+<script>
+let ZONE_COLORS = { High:"#d7301f", Moderate:"#fc8d59", Low:"#fdcc8a", Unburned:"#91cf60", Control:"#74a9cf" };
+const RAMPS = {
+  gray: "linear-gradient(90deg,#000,#fff)",
+  RdBu: "linear-gradient(90deg,#67001f,#d6604d,#f7f7f7,#4393c3,#053061)",
+  sev:  "linear-gradient(90deg,transparent 0 25%,#fee08b 25% 50%,#f46d43 50% 75%,#a50026 75%)",
+  BuRd: "linear-gradient(90deg,#053061,#4393c3,#f7f7f7,#d6604d,#67001f)",
+  new:  "linear-gradient(90deg,transparent 0 50%,#ff7a3d 50%)"
+};
+const LAYER_RAMP = { hv_before:"gray", hv_after:"gray", hv_change:"RdBu", dnbr:"sev" };
+
+let meta, ts, chart, metric = "hvrel", focus = null;
+
+const basemap = {
+  version: 8,
+  sources: { esri: { type: "raster", tileSize: 256,
+    tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    attribution: "Imagery: Esri, Maxar, Earthstar Geographics" } },
+  layers: [{ id: "esri", type: "raster", source: "esri" }]
+};
+
+function makeMap(id) {
+  return new maplibregl.Map({ container: id, style: basemap, center: [-121.44, 49.9], zoom: 10, attributionControl: id === "after" });
+}
+
+function addLayers(map, zones) {
+  for (const [key, o] of Object.entries(meta.overlays)) {
+    map.addSource(key, { type: "image", url: o.file, coordinates: o.coords });
+    map.addLayer({ id: key, type: "raster", source: key, paint: { "raster-opacity": 0.85, "raster-fade-duration": 0 }, layout: { visibility: "none" } });
+  }
+  if (meta.frames && meta.frames.items.length) {
+    const c = Object.values(meta.overlays)[0].coords;
+    map.addSource("frames", { type: "image", url: meta.frames.items[0].file, coordinates: c });
+    map.addLayer({ id: "frames", type: "raster", source: "frames", paint: { "raster-opacity": 0.85, "raster-fade-duration": 0 }, layout: { visibility: "none" } });
+  }
+  map.addSource("zones", { type: "geojson", data: zones });
+  map.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#000", "fill-opacity": 0 } });
+  map.addLayer({ id: "zones-line", type: "line", source: "zones",
+    paint: { "line-color": ["match", ["get", "zone"], ...Object.entries(ZONE_COLORS).flat(), "#fff"], "line-width": 1.2 } });
+  map.on("click", "zones-fill", e => setFocus(e.features[0].properties.zone));
+  map.on("mouseenter", "zones-fill", () => map.getCanvas().style.cursor = "pointer");
+  map.on("mouseleave", "zones-fill", () => map.getCanvas().style.cursor = "");
+}
+
+function show(map, key) {
+  const keys = Object.keys(meta.overlays).concat(map.getLayer("frames") ? ["frames"] : []);
+  for (const k of keys) map.setLayoutProperty(k, "visibility", k === key ? "visible" : "none");
+}
+
+function legend(el, key) {
+  const o = key === "frames" ? meta.frames : meta.overlays[key];
+  const ends = o.ends || (key === "dnbr" ? ["unburned", "low · mod · high"] : [o.vmin, o.vmax]);
+  el.innerHTML = `${o.label}<div class="bar" style="background:${RAMPS[o.ramp || LAYER_RAMP[key]]}"></div><div class="ends"><span>${ends[0]}</span><span>${ends[1]}</span></div>`;
+}
+
+function syncMaps(a, b) {
+  let busy = false;
+  const copy = (src, dst) => () => { if (busy) return; busy = true; dst.jumpTo({ center: src.getCenter(), zoom: src.getZoom(), bearing: src.getBearing(), pitch: src.getPitch() }); busy = false; };
+  a.on("move", copy(a, b)); b.on("move", copy(b, a));
+}
+
+function setupSwipe() {
+  const wrap = document.getElementById("mapwrap"), handle = document.getElementById("handle"), after = document.getElementById("after");
+  const move = x => {
+    const r = wrap.getBoundingClientRect();
+    const pct = Math.min(98, Math.max(2, (x - r.left) / r.width * 100));
+    handle.style.left = pct + "%"; after.style.clipPath = `inset(0 0 0 ${pct}%)`;
+  };
+  let drag = false;
+  handle.addEventListener("pointerdown", e => { drag = true; handle.setPointerCapture(e.pointerId); });
+  handle.addEventListener("pointermove", e => drag && move(e.clientX));
+  handle.addEventListener("pointerup", () => drag = false);
+}
+
+const fireLine = { id: "fireLine", afterDraw(c) {
+  if (!ts.fire_start) return;
+  const x = c.scales.x.getPixelForValue(Date.parse(ts.fire_start)), { top, bottom } = c.chartArea, g = c.ctx;
+  g.save(); g.strokeStyle = "#ff7a3d"; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke();
+  g.fillStyle = "#ff7a3d"; g.font = "11px system-ui"; g.fillText("fire starts", x + 4, top + 12); g.restore();
+} };
+
+function relSeries(pol) {
+  // Each zone minus Control, shifted so the pre-fire mean is 0. Weather that
+  // hits every zone cancels out; what is left is the change due to the fire.
+  const fire = Date.parse(ts.fire_start);
+  return ts.zones.map(z => {
+    const diff = ts.radar.map(r => ({ x: Date.parse(r.date),
+      y: r[pol][z] === null || r[pol].Control === null ? null : r[pol][z] - r[pol].Control })).filter(p => p.y !== null);
+    const pre = ts.fire_start ? diff.filter(p => p.x < fire) : diff.slice(0, 1);
+    const base = pre.length ? pre.reduce((a, p) => a + p.y, 0) / pre.length : 0;
+    return { label: z, borderColor: ZONE_COLORS[z], backgroundColor: ZONE_COLORS[z],
+      borderWidth: focus && focus !== z ? 1 : 2.5, pointRadius: focus && focus !== z ? 0 : 3,
+      borderDash: z === "Control" ? [4, 3] : [], order: focus === z ? 0 : 1,
+      segment: { borderColor: () => focus && focus !== z ? ZONE_COLORS[z] + "55" : ZONE_COLORS[z] },
+      data: diff.map(p => ({ x: p.x, y: +(p.y - base).toFixed(3) })) };
+  });
+}
+
+function series(k) {
+  if (k === "hvrel") return relSeries("hv");
+  if (k === "hhrel") return relSeries("hh");
+  const rows = k === "nbr" ? ts.optical : ts.radar;
+  return ts.zones.map(z => ({
+    label: z, borderColor: ZONE_COLORS[z], backgroundColor: ZONE_COLORS[z],
+    borderWidth: focus && focus !== z ? 1 : 2.5, pointRadius: focus && focus !== z ? 0 : 3,
+    borderDash: z === "Control" ? [4, 3] : [],
+    data: rows.map(r => ({ x: Date.parse(r.date), y: r[k][z] })).filter(p => p.y !== null),
+    hidden: false, order: focus === z ? 0 : 1,
+    segment: { borderColor: ctx => focus && focus !== z ? ZONE_COLORS[z] + "55" : ZONE_COLORS[z] }
+  }));
+}
+
+const YLABEL = { hhrel: "HH change vs Control (dB)", hvrel: "HV change vs Control (dB)", hv: "HV backscatter (dB)", hh: "HH backscatter (dB)", nbr: "NBR (unitless)" };
+const EXPLAIN_GROWTH = {
+  hhrel: "Each zone's HH minus the rural Control, set to 0 on the first 2026 date. Weather cancels out. New development rising above 0 means construction is still adding bright, building-like surfaces.",
+  hh: "HH is strongest where walls and ground form corners, so built-up areas are the brightest. New development should sit between rural land and the established city.",
+  hv: "HV comes mostly from vegetation. Land cleared for building loses HV even before houses go up."
+};
+const EXPLAIN = {
+  hvrel: "Each zone's HV minus the unburned Control, set to 0 before the fire. Rain and season hit every zone alike and cancel out. A line falling below 0 means that zone lost HV because of the fire.",
+  hv: "Expect burn zones to fall below Control after the fire, deepest in High severity. A slow climb back over months points to regrowth. Dips shared with Control are weather, not fire.",
+  hh: "HH holds more ground and trunk scattering. After a fire it can rise (exposed, wetter soil and bare trunks) even as HV falls. Compare the two tabs.",
+  nbr: "NBR from Sentinel-2. Gaps are cloudy or smoky dates, which is exactly where radar keeps observing."
+};
+
+function drawChart() {
+  const fmt = v => new Date(v).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+  const cfg = {
+    type: "line", data: { datasets: series(metric) }, plugins: [fireLine],
+    options: { responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+      interaction: { mode: "nearest", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: i => fmt(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)}` } } },
+      scales: { x: { type: "linear", ticks: { color: "#9aa7b2", callback: fmt, maxTicksLimit: 7 }, grid: { color: "#2a353f" } },
+                y: { title: { display: true, text: YLABEL[metric], color: "#9aa7b2" }, ticks: { color: "#9aa7b2" }, grid: { color: "#2a353f" } } } }
+  };
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), cfg);
+  document.getElementById("explain").textContent = (meta.kind === "growth" ? EXPLAIN_GROWTH[metric] : null) || EXPLAIN[metric];
+}
+
+function setFocus(z) {
+  focus = focus === z ? null : z;
+  document.querySelectorAll(".chip").forEach(c => c.classList.toggle("dim", !!focus && c.dataset.z !== focus));
+  drawChart();
+}
+
+const nf = v => Math.round(v).toLocaleString("en-CA");
+const dfmt = t => new Date(t).toLocaleDateString("en-CA", { month: "short", day: "numeric", timeZone: "UTC" });
+
+function findings(zones) {
+  // Plain-language takeaways worked out from this site's own numbers.
+  const area = z => { const f = zones.features.find(f => f.properties.zone === z); return f ? f.properties.area_ha || 0 : 0; };
+  const out = [];
+  if (meta.kind === "growth") {
+    const nd = area("New development"), eu = area("Established urban");
+    if (nd) out.push(`About <b>${nf(nd)} ha</b> turned into new development since ${meta.baseline_year}${eu ? `, equal to ${Math.round(nd / eu * 100)}% of the established urban area` : ""}.`);
+    const rel = relSeries("hh").find(s => s.label === "New development");
+    if (rel && rel.data.length > 2) {
+      const last = rel.data.at(-1).y;
+      out.push(last > 0.5 ? `New development got <b>${last.toFixed(1)} dB brighter</b> during 2026: construction is still adding hard surfaces.`
+                          : "New development stayed about as bright through 2026: most of it was finished before this summer.");
+    }
+    out.push("Radar sees through cloud, so this works through the coast's grey winters too.");
+    return { items: out, use: `Use it to compare growth against zoning, farmland and wetland maps, and see what development is replacing around ${meta.city}.` };
+  }
+  const fire = Date.parse(ts.fire_start);
+  const burned = area("High") + area("Moderate") + area("Low");
+  if (burned) out.push(`<b>${nf(burned)} ha</b> burned inside the perimeter, ${nf(area("High"))} ha of it at high severity.`);
+  const high = relSeries("hv").find(s => s.label === "High");
+  const post = high ? high.data.filter(p => p.x >= fire) : [];
+  if (post.length) {
+    const low = post.reduce((a, b) => (b.y < a.y ? b : a));
+    if (low.y < -0.5) {
+      const pct = Math.round((1 - Math.pow(10, low.y / 10)) * 100);
+      out.push(`High-severity forest lost up to <b>${(-low.y).toFixed(1)} dB</b> of radar return, about <b>${pct}% less</b> than unburned forest (${dfmt(low.x)}).`);
+      const first = post.find(p => p.y <= -1);
+      if (first) out.push(`The loss showed up <b>${Math.round((first.x - fire) / 864e5)} days</b> after the fire started.`);
+    } else out.push("High-severity forest has lost little radar return so far: the dead trees are likely still standing.");
+    const lastAll = ts.zones.filter(z => z !== "Control").map(z => (relSeries("hv").find(s => s.label === z) || { data: [] }).data.at(-1)).filter(Boolean);
+    if (lastAll.length && lastAll.every(p => p.y > 0.5)) out.push("On the last pass every burned zone jumped above unburned forest: wet weather on exposed burned ground.");
+  }
+  if (ts.optical.length) {
+    const opt = ts.optical.map(o => Date.parse(o.date));
+    const after = ts.radar.filter(r => Date.parse(r.date) >= fire);
+    const blind = after.filter(r => !opt.some(o => Math.abs(o - Date.parse(r.date)) <= 6 * 864e5)).length;
+    if (blind) out.push(`On <b>${blind} of ${after.length}</b> radar passes after the fire, Sentinel-2 had no clear view within 6 days. NISAR still measured.`);
+  }
+  return { items: out, use: "Use it to find high-severity slopes to check for debris flows and erosion, and to track regrowth every 12 days, even through smoke." };
+}
+
+function setupFrames(after, selR) {
+  const F = meta.frames;
+  if (!F || !F.items.length) return;
+  for (const it of F.items) { const im = new Image(); im.src = it.file; }  // preload
+  selR.add(new Option("Date by date (animation)", "frames"));
+  const bar = document.getElementById("timebar"), slider = document.getElementById("tslider"),
+        label = document.getElementById("tdate"), btn = document.getElementById("play");
+  bar.hidden = false; slider.max = F.items.length - 1;
+  const fire = ts.fire_start ? Date.parse(ts.fire_start) : null;
+  const go = i => {
+    const it = F.items[i]; slider.value = i;
+    if (selR.value !== "frames") { selR.value = "frames"; show(after, "frames"); legend(document.getElementById("legR"), "frames"); }
+    after.getSource("frames").updateImage({ url: it.file, coordinates: Object.values(meta.overlays)[0].coords });
+    const t = Date.parse(it.date);
+    label.textContent = `${dfmt(t)} 2026` + (fire ? (t < fire ? " · before fire" : ` · day ${Math.round((t - fire) / 864e5)}`) : "");
+  };
+  let timer = null;
+  const stop = () => { clearInterval(timer); timer = null; btn.textContent = "Play"; };
+  btn.onclick = () => {
+    if (timer) return stop();
+    let i = +slider.value >= F.items.length - 1 ? 0 : +slider.value;
+    btn.textContent = "Pause"; go(i);
+    timer = setInterval(() => { i++; if (i >= F.items.length) return stop(); go(i); }, 900);
+  };
+  slider.oninput = () => { stop(); go(+slider.value); };
+  label.textContent = `${F.items.length} radar passes`;
+}
+
+async function pickSite() {
+  // web/data/sites.json lists every processed community; ?site= picks one.
+  let sites = [];
+  try { sites = await fetch("data/sites.json").then(r => r.ok ? r.json() : []); } catch (e) { sites = []; }
+  if (!sites.length) return "data/";
+  const want = new URLSearchParams(location.search).get("site");
+  const cur = sites.find(s => s.site === want) || sites[0];
+  const sel = document.getElementById("city");
+  for (const s of sites) sel.add(new Option(`${s.city} · ${s.kind === "growth" ? "city growth" : "wildfire"}`, s.site));
+  sel.value = cur.site;
+  sel.onchange = () => { location.search = "?site=" + encodeURIComponent(sel.value); };
+  return `data/${cur.site}/`;
+}
+
+async function init() {
+  const base = await pickSite();
+  [meta, ts] = await Promise.all([fetch(base + "meta.json").then(r => r.json()), fetch(base + "timeseries.json").then(r => r.json())]);
+  const zones = await fetch(base + "zones.geojson").then(r => r.json());
+  window.__zones = zones;
+  document.getElementById("firename").textContent = meta.fire_name + (meta.summary ? " · " + meta.summary : "");
+  if (meta.zone_colors) ZONE_COLORS = { ...ZONE_COLORS, ...meta.zone_colors };
+  if (meta.kind === "growth") setupGrowth();
+  if (meta.demo) document.getElementById("demo").style.display = "block";
+  document.getElementById("dates").textContent = `Radar before: ${meta.before_dates.join(", ") || "n/a"}. Radar after: ${meta.after_dates.join(", ")}.`;
+
+  const before = makeMap("before"), after = makeMap("after");
+  syncMaps(before, after); setupSwipe();
+  const c = Object.values(meta.overlays)[0].coords;
+  const bounds = [[c[0][0], c[2][1]], [c[2][0], c[0][1]]];
+
+  const selL = document.getElementById("selL"), selR = document.getElementById("selR");
+  for (const [k, o] of Object.entries(meta.overlays)) { selL.add(new Option(o.label, k)); selR.add(new Option(o.label, k)); }
+  selL.value = meta.default_left || "hv_before"; selR.value = meta.default_right || "hv_after";
+
+  let ready = 0;
+  const onReady = () => {
+    if (++ready < 2) return;
+    show(before, selL.value); show(after, selR.value);
+    legend(document.getElementById("legL"), selL.value); legend(document.getElementById("legR"), selR.value);
+    before.fitBounds(bounds, { padding: 30, animate: false });
+    setupFrames(after, selR);
+  };
+  // style.load (not load) so a blocked basemap never stops the app
+  before.once("style.load", () => { addLayers(before, zones); onReady(); });
+  after.once("style.load", () => { addLayers(after, zones); onReady(); });
+  selL.onchange = () => { show(before, selL.value); legend(document.getElementById("legL"), selL.value); };
+  selR.onchange = () => { show(after, selR.value); legend(document.getElementById("legR"), selR.value); };
+
+  const chips = document.getElementById("chips");
+  for (const z of ts.zones) {
+    const el = document.createElement("span"); el.className = "chip"; el.dataset.z = z;
+    el.innerHTML = `<i style="background:${ZONE_COLORS[z]}"></i>${z}`; el.onclick = () => setFocus(z); chips.append(el);
+  }
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+    metric = b.dataset.k; drawChart();
+  });
+  if (!ts.optical.length) document.querySelector('.tabs button[data-k="nbr"]').style.display = "none";
+  drawChart();
+  const fd = findings(zones);
+  if (fd.items.length) {
+    document.getElementById("findlist").innerHTML = fd.items.map(t => `<li>${t}</li>`).join("");
+    document.getElementById("finduse").textContent = fd.use;
+    document.getElementById("findings").hidden = false;
+  }
+}
+
+function setupGrowth() {
+  // Same app, labels for city growth instead of wildfire.
+  metric = "hhrel";
+  const rel = document.querySelector('.tabs button[data-k="hvrel"]');
+  rel.dataset.k = "hhrel"; rel.textContent = "HH vs Control";
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b === rel));
+  document.getElementById("charttitle").textContent = "How each zone changed in 2026";
+  document.getElementById("chartnote").textContent = "Mean per zone. Click a zone on the map or a chip below to focus it.";
+  document.getElementById("apptitle").textContent = "City Growth Radar";
+  const y = meta.baseline_year;
+  document.getElementById("explainer").innerHTML = `<summary>What am I looking at?</summary>
+    <p class="note"><b>Radar brightness.</b> Buildings act as corner reflectors, so built-up land is among the brightest L-band radar returns (HH). Forest and fields are darker.</p>
+    <p class="note"><b>Then vs now.</b> ${y} comes from Japan's ALOS-2 PALSAR-2 yearly mosaic; 2026 from NISAR. Both are L-band, but calibrated differently, so each is shown as a brightness <i>rank</i> within the area (0 darkest, 100 brightest).</p>
+    <p class="note"><b>New development</b> = land that was below the median in ${y} and is in the brightest 15% now. <b>Control</b> = land that stayed quiet in both years.</p>`;
+}
+init().catch(err => { document.getElementById("firename").textContent = "Could not load data/ (serve this folder over http, not file://). " + err; });
+</script>
+</body>
+</html>
